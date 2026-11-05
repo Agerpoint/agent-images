@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 15,
+            "command": "\"$CLAUDE_CONFIG_DIR/hooks/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
