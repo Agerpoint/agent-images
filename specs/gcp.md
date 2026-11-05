@@ -533,10 +533,76 @@ runner sets the same).
     user the gs:// path.
   - Read shared inputs from $AGENT_DATASETS (read-only).
   - Code still goes to git: commit and push before the session ends.
+
+  ## Cost and time limit
+  - This runtime costs about $AGENT_COST_USD_PER_HOUR an hour while the session
+    runs, and the session ends at a set time (the start-of-session facts give both).
+    Start your first reply with the notice line from those facts. Before starting
+    work you expect to take over an hour, say what it will roughly cost and whether
+    it fits before the end time. Commit and push well before the end.
   ```
 - The same `SessionStart` hook prints one line of facts into the session's context:
   free space on scratch, the outputs path as `gs://...`, and what's at the top of
   datasets.
+
+**Session notice: cost and time limit.** Every session opens by saying what its
+runtime costs and when it will end, for example:
+
+```
+⚠ This runtime costs approximately $8.99/hour.
+⚠ This session will time out after 60 minutes of inactivity, and ends by 6:42 PM PST
+at the latest (in 7 h 52 min). Push your work before then.
+```
+
+A `CLAUDE.md` can't print anything on its own (it's instructions to Claude, not
+output), so the same `SessionStart` hook does it two ways:
+
+- `systemMessage` in its JSON output, which Claude Code shows to the user as a
+  warning line;
+- `additionalContext` carrying the same line, with the `CLAUDE.md` rule above
+  ("start your first reply with the cost line"), in case a surface doesn't show
+  hook messages. m1 checks what claude.ai actually shows and drops whichever is
+  redundant.
+
+The end time is worked out at session start, by the hook, because it depends on when
+the runner started, not only on settings. The session ends at the earliest of:
+
+- the session's own limit, `--kill-session-after-min` (480 by default, set per type);
+- the runner's deadline, which the entrypoint sets as `--retire-at` from the job's
+  task timeout (12 hours for GPU jobs) minus a margin, and exports as
+  `AGENT_RETIRE_AT`. A standby that waited an hour for its session has an hour less,
+  which is why the hook reads the real deadline instead of assuming the full limit;
+- the inactivity timeout, `--release-idle-session-min` (60): after that long with
+  no messages, the runner lets the session go. It resumes on a fresh runner at the
+  next message, but anything unpushed is gone, so the notice leads with it. The
+  minutes come from the type's settings, never hardcoded.
+
+The time shows in `AGENT_NOTICE_TZ` (in `infra/gcp/project.env`,
+`America/Los_Angeles`), with the time remaining beside it. Near the end, the runner's
+own `--retire-at` handling releases the session cleanly after its current turn; the
+Stop hook that already asks Claude to push covers the rest.
+
+The figure is worked out at deploy, not baked into the image, because it depends on
+the job's resources (CPU, memory, GPU, scratch disk), which change in
+`infra/gcp/<type>.env` without an image build. Every deploy, which includes every
+image build and the nightly one:
+
+1. reads the type's resources from its env file;
+2. looks up the current prices for them in `us-central1` from the Cloud Billing
+   Catalog API (Cloud Run CPU, memory, GPU and ephemeral disk SKUs; Compute Engine
+   N2 cores, memory and balanced disk for `android`), with the workflow's federated
+   identity;
+3. sets two environment variables on the job (or the `android` VM's metadata):
+   `AGENT_COST_USD_PER_HOUR` (`8.99`) and `AGENT_COST_DETAIL` (each part's share and
+   the date the prices were read);
+4. writes the same figures into the image manifest and the job summary, so a price
+   change shows up in the deploy log.
+
+The figure is the runtime's list price per hour of the session, rounded up to the
+cent. It leaves out Claude usage itself (billed to the plan, not GCP), the free tier,
+egress, and the buckets, and the notice says "approximately" for that reason. If the
+price lookup fails, the deploy keeps the last figure and flags it in the job summary
+rather than failing.
 
 **Idle cost.** Close to nothing:
 
