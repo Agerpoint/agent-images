@@ -96,10 +96,26 @@ The first deploy shows these:
 
 ## Pending
 
-[lolay/agent-images#13](https://github.com/lolay/agent-images/pull/13) is open, and
-this session watches it: it fixes CI failures and answers review comments. Next is
-Gary's s13: create `production`, review, merge. The PR description is the review
-guide (the draft was removed from the branch before opening).
+PR #13 merged as `f2bd141`. Its first deploy failed at the smoke run on
+`agent-linux-next`: every check passed except `sudo`, which Cloud Run's
+no-new-privileges flag blocks. The CI identity can't read logs, so Gary pulled the
+log by hand.
+
+On this branch (restarted from `main`, with the old tip merged in `-s ours`, not
+force-pushed):
+- `c25541e`: the deploy prints a failed smoke execution's log. Needs
+  `roles/logging.viewer` for `agent-images-ci`: `lolay/infrastructure` `16109d4` on
+  its branch of the same name, `make ci` passing.
+- `8fa4c0f`: no sudo on Cloud Run. Sessions stay `ubuntu` and install with
+  Homebrew; smoke checks that Homebrew's prefix is writable; the outputs mount drops
+  its uid/gid options (Cloud Run gave them uid 2000). Verified under Docker
+  `--security-opt no-new-privileges`.
+
+Gary chose the no-root path (2026-11-05): sessions run as `ubuntu`, like the Linux
+host image. Open: [lolay/agent-images#14](https://github.com/lolay/agent-images/pull/14)
+(these commits) and [lolay/infrastructure#6](https://github.com/lolay/infrastructure/pull/6)
+(the log grant), both watched by this session. Merging #14 redeploys `linux` and the
+orchestrator; merging #6 first lets that deploy print a smoke failure's log.
 
 ## Steps that need Gary
 
