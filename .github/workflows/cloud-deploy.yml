@@ -111,6 +111,14 @@ jobs:
       - name: Tag
         id: tag
         run: echo "tag=$(date -u +%Y%m%d)-${GITHUB_SHA::12}" >>"$GITHUB_OUTPUT"
+      # Hosted runners leave about 14 GB free, and agent-gis alone is 9 GB. The
+      # preinstalled toolchains these jobs never use (.NET, Android, GHC,
+      # CodeQL) are about 30 GB more.
+      - name: Free disk
+        if: matrix.build
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: docker/setup-buildx-action@v4.4.1
         if: matrix.build
       - name: Build and push
@@ -134,6 +142,8 @@ jobs:
           set: |
             base.cache-from=type=gha,scope=base
             base.cache-to=type=gha,mode=max,scope=base
+            ${{ matrix.type }}-tools.cache-from=type=gha,scope=${{ matrix.type }}-tools
+            ${{ matrix.type }}-tools.cache-to=type=gha,mode=max,scope=${{ matrix.type }}-tools
             ${{ matrix.type }}.cache-from=type=gha,scope=${{ matrix.type }}
             ${{ matrix.type }}.cache-to=type=gha,mode=max,scope=${{ matrix.type }}
       - name: Smoke and promote

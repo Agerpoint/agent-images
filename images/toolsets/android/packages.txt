@@ -1,0 +1,24 @@
+# The Android emulator's system side. install.sh then adds the SDK, the AVD and
+# its snapshot (it needs KVM to boot the emulator once, so VM images only).
+
+# KVM checks (kvm-ok) for make doctor and agent-emulator status.
+cpu-checker
+
+# Android emulator runtime libraries (a headless emulator still links them).
+libasound2t64
+libdrm2
+libegl1
+libfontconfig1
+libgbm1
+libgl1
+libnss3
+libpulse0
+libx11-xcb1
+libxcomposite1
+libxcursor1
+libxdamage1
+libxi6
+libxkbcommon0
+libxkbfile1
+libxrandr2
+libxtst6

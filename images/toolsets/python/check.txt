@@ -1,0 +1,6 @@
+# Smoke checks (images/cloud/entrypoint.sh): label: command, which must exit 0;
+# its first line of output is the reported version.
+python3: python3 --version
+uv: uv --version
+ruff: ruff --version
+pre-commit: pre-commit --version

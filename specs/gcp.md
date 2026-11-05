@@ -34,8 +34,8 @@ Cloud Run job execution  (one per session)
 
 | Today (Linux host) | GCP |
 | --- | --- |
-| `lxc launch agent-linux runner-N --ephemeral` | A run of job `agent-<type>` through the Cloud Run Admin API: one execution, gone when it exits |
-| `build-image.sh` → `lxc publish agent-linux-next`, move the alias | Build and push to Artifact Registry, smoke-test `agent-<type>-next`, then point the job at the new digest |
+| `lxc launch agent-android runner-N --ephemeral` | A run of job `agent-<type>` through the Cloud Run Admin API: one execution, gone when it exits |
+| `build-image.sh` → `lxc publish agent-android-next`, move the alias | Build and push to Artifact Registry, smoke-test `agent-<type>-next`, then point the job at the new digest |
 | systemd user unit runs the orchestrator | One `e2-micro` running the orchestrator container |
 | `~/.config/agent-images` holds the environment secret | Secret Manager, read only by the orchestrator's service account |
 | `runner-once.sh` deletes the VM | Nothing to delete: the execution ends when the container exits |
@@ -61,7 +61,7 @@ Each type is four things, declared in `infra/gcp/<type>.env`:
 | --- | --- | --- | --- | --- |
 | `linux` | `agent-linux` (`agent-base` as is) | Cloud Run job, 4 vCPU, 16 GiB | 10 GiB | 0: a standby holds 4 vCPU and 16 GiB, about $270 a month; 1 later if cold starts hurt |
 | `linux-gpu` | `agent-linux-gpu` (`agent-base-gpu` as is) | Cloud Run job, RTX PRO 6000, 20 vCPU, 80 GiB (that GPU's minimum); L4 for cheap tests | 10 GiB now, 100 GiB later | 0: a standby GPU bills the whole time |
-| `gis` | `agent-gis` (from `agent-base`: GDAL, QGIS, PDAL) | Cloud Run job, CPU | 10 GiB now, 100 GiB later | 0 or 1 |
+| `gis` | `agent-gis` (toolsets core, native, node, gis: GDAL, PDAL, QGIS from conda-forge) | Cloud Run job, CPU | 10 GiB now, 100 GiB later | 0 or 1 |
 | `3d-gpu` | `agent-3d-gpu` (from `agent-base-gpu`: COLMAP built for Blackwell, Blender) | Cloud Run job, RTX PRO 6000 | 10 GiB now, 200 GiB (two volumes) later | 0 |
 | `android` | Compute Engine image | Compute Engine VM per session with nested virtualization ([below](#compute-engine-vm-per-session-android-and-the-gpu-fallback)); Cloud Run has no KVM | 100 GB boot disk | 0 |
 | `mac` | Not on GCP | agent-images' Macs (Tart), as today: Mac development, iOS included | The VM's disk | Per host |
@@ -79,8 +79,8 @@ compose the same way if they come (`linux-arm64`). Every resource takes the type
 name: environment "Agent: 3D (GPU)" in claude.ai, `infra/gcp/3d-gpu.env`, secret
 `claude-env-3d-gpu`, image and job `agent-3d-gpu`, `images/cloud/3d-gpu/`. The two
 build parents, `agent-base` and `agent-base-gpu`, aren't types and never deploy on
-their own. (`agent-linux` here is a Cloud Run image; the Linux host's LXD alias of
-the same name is the Android image, and would be clearer renamed `agent-android`.)
+their own. (The Linux host's LXD image, the Android one, was also called
+`agent-linux` until [image-toolsets.md](image-toolsets.md) s5; it's `agent-android`.)
 
 **One host for all orchestrators, one orchestrator per type.** An orchestrator
 registers with one environment's secret, so it serves exactly one type; there's no
@@ -146,17 +146,24 @@ Region: `us-central1`, the one with both L4 and RTX PRO 6000 on Cloud Run.
 
 ## Images
 
+Each type's tools are a list of toolsets ([image-toolsets.md](image-toolsets.md)),
+so no type inherits another's. `agent-base-gpu` (m3) is still to come, on CUDA's devel
+image rather than runtime.
+
 We manage them, in this repo, next to the macOS and Linux images, and they share
 `images/shared` so sessions behave the same everywhere.
 
 ```
 images/cloud/
-  base/Dockerfile      ubuntu:24.04; images/linux/packages.txt; Homebrew + Brewfile
-                       as the runner user; Claude Code native installer;
-                       images/shared (runner, watchdog, Stop hook, ~/.claude seed)
-  base-gpu/Dockerfile  ARG BASE (CUDA 13.0 runtime on ubuntu:24.04), then the base
-                       layers; Xvfb, VirtualGL, mesa-utils, vulkan-tools; optional noVNC
-  <type>/Dockerfile    FROM agent-base or agent-base-gpu, adds the type's tools
+  base/Dockerfile      ubuntu:24.04 through mirror.gcr.io, the runner user, and the
+                       core toolset; a build parent only
+  base-gpu/Dockerfile  (m3) the same on CUDA 13.0 devel; Xvfb, VirtualGL, mesa-utils,
+                       vulkan-tools; optional noVNC
+  <type>/Dockerfile    FROM agent-base or agent-base-gpu, adds the type's toolsets,
+                       one layer each (bake target <type>-tools)
+  runner/Dockerfile    FROM the type's tools: images/shared (runner, watchdog, Stop
+                       hook, ~/.claude seed), the session's CLAUDE.md from its
+                       toolsets, profile.sh, then Claude Code last (target <type>)
   entrypoint.sh        set AGENT_SCRATCH and AGENT_DATASETS, point CLAUDE_BASE_DIR at
                        /scratch/workspace, TMPDIR at /scratch/tmp and the caches
                        (XDG_CACHE_HOME, pip, Homebrew) at /scratch/cache, move the
@@ -174,14 +181,18 @@ Choices, carried over from [design.md](design.md):
   container, so `sudo` (and with it `apt-get install`) can't work there: found by m1's
   first smoke run, 2026-11-05. Sessions install with Homebrew, which the user owns;
   root instead would lose that, since Homebrew refuses to run as root. So the base
-  image carries the usual toolchains already (the Linux image's packages.txt and
-  Brewfile: Node, Python, Go, Rust, protobuf, Terraform), rather than leave every
+  image carries the usual toolchains already (the Linux image's toolsets: Node,
+  Python, Go, Rust, protobuf, Terraform), rather than leave every
   session to install them. The `android` VMs keep passwordless sudo.
 - **CUDA matches the host driver.** Cloud Run mounts its driver (580.x, CUDA 13.0) at
   `/usr/local/nvidia/lib64`, so `agent-base-gpu` uses a CUDA 13.0 userland. Newer CUDA
   needs NVIDIA's forward-compatibility package. Anything compiled (COLMAP, PyTorch
   extensions) must target compute capability 12.0 or carry PTX, or it fails on
   Blackwell.
+- **Docker Hub images come through Google's mirror** (`mirror.gcr.io/library/ubuntu`,
+  `mirror.gcr.io/nvidia/cuda`): Docker Hub rate-limits anonymous pulls, which CI and
+  local builds hit. The mirror is a pull-through cache of Docker Hub, so a digest is
+  the same on both; a tag can trail Docker Hub's for a while after it moves.
 - **No secrets in images or sessions** ([secrets.md](secrets.md)). The runner's
   service account gets logging and the two buckets (below) only.
 - **Claude upgrades itself at start until m4.** The plan is no self-update: the watch
@@ -192,11 +203,12 @@ Choices, carried over from [design.md](design.md):
 Layer order, slowest-moving first, so a rebuild only redoes what changed:
 
 ```
-FROM <base>@<digest>      ubuntu:24.04, or nvidia/cuda 13.0 runtime for gpu
-apt packages              packages.txt, at the locked snapshot
-Homebrew + Brewfile       incl. lolay/tap
-type tools                gis, 3d, ...
-images/shared files
+FROM <base>@<digest>      ubuntu:24.04, or nvidia/cuda 13.0 runtime for gpu,
+                          both through mirror.gcr.io
+core toolset              apt, Homebrew, the shared session tools (agent-base)
+type toolsets             one layer each: apt at the locked snapshot, Brewfile,
+                          install.sh (images/cloud/<type>)
+images/shared files       and the session files (images/cloud/runner)
 Claude Code               ARG CLAUDE_VERSION; RUN install that exact version
 manifest                  /etc/agent-images/manifest.json, also an OCI label
 ```
@@ -235,7 +247,8 @@ matrix. A failed deploy makes the next one redeploy more, never less:
 
 | Path changed | Redeploys |
 | --- | --- |
-| `images/shared/**`, `images/linux/packages.txt`, `images/linux/Brewfile`, `images/linux/scripts/install-packages.sh`, `images/cloud/base/**`, `images/cloud/entrypoint.sh`, `images/cloud/docker-bake.hcl`, `.dockerignore` | Every runner type |
+| `images/shared/**`, `images/toolsets/install-toolset.sh`, `images/toolsets/write-claude-md.sh`, `images/cloud/base/**`, `images/cloud/runner/**`, `images/cloud/entrypoint.sh`, `images/cloud/docker-bake.hcl`, `.dockerignore` | Every runner type |
+| `images/toolsets/<toolset>/**` | The types whose Dockerfiles (or build parents') install that toolset |
 | `images/cloud/base-gpu/**` | Every `-gpu` type (each is built `FROM` it) |
 | `images/cloud/<type>/**`, including its `versions.lock` | That type |
 | `hooks/gcp/**`, `images/cloud/orchestrator/**` | The orchestrator host (new image, then the host restarts its container) |
@@ -257,7 +270,7 @@ image.
 
 | Dependency | Locked as | Resolved by (on the hosted runner, from upstream only) |
 | --- | --- | --- |
-| Base image | Digest | `crane digest ubuntu:24.04` (or the CUDA tag): a registry HEAD, no pull |
+| Base image | Digest | `crane digest mirror.gcr.io/library/ubuntu:24.04` (or the CUDA tag): a registry HEAD, no pull |
 | apt packages, dependencies included | An Ubuntu snapshot timestamp, plus the full resolved list | `apt-get install --simulate` of `packages.txt` in a stock `ubuntu:24.04` container at the locked base digest, once with `--snapshot <locked>` and once against today's archive. Any difference in the resolved set means apt moved |
 | Homebrew, dependencies and `lolay/tap` included | Each formula and cask with its version and revision | `brew info --json=v2` on the runner's own Homebrew (preinstalled on Ubuntu runners), after `brew tap lolay/tap` |
 | Claude Code | Version | `https://downloads.claude.ai/claude-code-releases/latest` |
@@ -406,7 +419,7 @@ it's fixed. How, per source:
 
 | Dependency | Pin | Notes |
 | --- | --- | --- |
-| Base image | `FROM ubuntu:24.04@sha256:...` | The watch reports it as pinned instead of rebuilding |
+| Base image | `FROM mirror.gcr.io/library/ubuntu:24.04@sha256:...` | The watch reports it as pinned instead of rebuilding |
 | apt package | `name=version` in `packages.txt`, resolved against the locked snapshot | The snapshot keeps old versions installable. To hold all of apt still, freeze the snapshot timestamp in the lock |
 | Homebrew formula | A versioned formula if one exists (`python@3.12`), else `brew extract --version=X <formula> lolay/tap` and name `lolay/tap/<formula>@X` in the Brewfile | `brew pin` doesn't help a fresh build. An extracted formula has no bottle, so it builds from source |
 | `lolay/tap` formula | Revert in the tap, or add a versioned formula there | It's ours |
@@ -727,7 +740,7 @@ the session or a full GPU desktop.
 
 - **Image:** Packer's `googlecompute` builder, run from GitHub Actions (the build VM
   runs in GCP, so nothing is pulled out), provisioned by the same scripts as the LXD
-  image (`images/linux/scripts`, `images/shared`): Android SDK, emulator, a booted
+  image (`images/android/scripts`, `images/shared`): Android SDK, emulator, a booted
   and snapshotted AVD. Published to the image family `agent-android`; the `-next`
   pattern becomes "build, boot a test VM from it, then add it to the family", and
   older images in the family are deleted, keeping one.
@@ -791,6 +804,8 @@ deploys found:
 
 ### m2 - `gis` and `android`
 
+- First, toolsets ([image-toolsets.md](image-toolsets.md), s1 to s5), so `gis`
+  and `android` each get their own tool list rather than the Android image's.
 - `gis`: `images/cloud/gis` (GDAL, PDAL, QGIS), its job and environment. Done when
   [tests/sessions/gis.md](../tests/sessions/gis.md) passes.
 - `android`: the Compute Engine path above: Packer image, the hook's Compute Engine

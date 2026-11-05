@@ -1,0 +1,26 @@
+# Homebrew formulae every image gets, Linux and macOS alike, so the session tools
+# are defined once. No versions, same policy (specs/design.md, "Track the
+# latest"). Homebrew's are current where Ubuntu's archive is years behind (gh).
+#
+# Every tap listed here is trusted before the bundle runs (install-toolset.sh on
+# Linux, images/macos/scripts/install-packages.sh on macOS).
+tap "lolay/tap"
+
+# Session tools.
+brew "age"
+brew "gh"
+brew "ripgrep"
+brew "sops"
+brew "tmux"
+# On Linux, git and jq come from Ubuntu's archive (core/packages.txt): Homebrew's
+# installer needs git, and the hooks and image scripts call jq before Homebrew is
+# on PATH.
+brew "git" if OS.mac?
+brew "jq" if OS.mac?
+
+# Lint.
+brew "actionlint"
+brew "shellcheck"
+
+brew "lolay/tap/nowline"
+brew "lolay/tap/triage"

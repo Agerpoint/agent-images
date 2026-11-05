@@ -43,7 +43,7 @@ LEVEL ?= patch
 
 MACOS_DIR := images/macos
 SHARED_DIR := images/shared
-LINUX_DIR := images/linux
+ANDROID_DIR := images/android
 BUILD_DIR := build
 LOG_DIR := $(BUILD_DIR)/logs
 IMAGE_NAME := agent-macos
@@ -52,7 +52,7 @@ IMAGE_NAME := agent-macos
 PKR_VAR_vm_name := $(IMAGE_NAME)-next
 ifeq ($(HOST_OS),Linux)
 # The LXD image alias scripts/linux/build-image.sh publishes.
-IMAGE_REF ?= agent-linux
+IMAGE_REF ?= agent-android
 else
 IMAGE_REF ?= $(IMAGE_NAME)
 endif
@@ -96,7 +96,8 @@ PKR_VAR_base_image ?= ghcr.io/cirruslabs/macos-$(MACOS_CODENAME)-xcode:latest
 # The GCP runners (specs/gcp.md): the Cloud Run images, the orchestrator
 # container, the hook and the deploy scripts. Built and tested on Linux with
 # Docker; the deploy itself runs only from main, in GitHub Actions.
-CLOUD_SCRIPTS := $(wildcard images/cloud/*.sh images/cloud/base/*.sh images/cloud/base/claude/hooks/*.sh \
+CLOUD_SCRIPTS := $(wildcard images/cloud/*.sh images/cloud/runner/*.sh images/cloud/runner/claude/hooks/*.sh \
+                   images/toolsets/*.sh images/toolsets/*/*.sh \
                    images/cloud/orchestrator/*.sh scripts/cloud/*.sh hooks/gcp/*.sh) hooks/gcp/spawn-runner
 CLOUD_BAKE := docker buildx bake -f images/cloud/docker-bake.hcl
 # TYPE=all builds every type and the orchestrator (the bake file's default group).
@@ -106,7 +107,7 @@ CLAUDE_VERSION ?= latest
 
 SHELL_SCRIPTS := $(wildcard $(MACOS_DIR)/scripts/*.sh $(MACOS_DIR)/files/*.sh \
                    $(SHARED_DIR)/*.sh $(SHARED_DIR)/runners/*.sh $(SHARED_DIR)/claude/hooks/*.sh \
-                   $(LINUX_DIR)/scripts/*.sh $(LINUX_DIR)/files/*.sh \
+                   $(ANDROID_DIR)/scripts/*.sh $(ANDROID_DIR)/files/*.sh \
                    scripts/*.sh scripts/linux/*.sh hooks/spawn-runner hooks/linux/spawn-runner) \
                  $(CLOUD_SCRIPTS)
 
@@ -311,7 +312,7 @@ cloud-smoke: ## Run a built image's smoke checks against stand-in volumes: TYPE=
 cloud-lint: ## Lint the cloud scripts and settings (no writes)
 	shellcheck -x $(CLOUD_SCRIPTS)
 	shfmt -d $(CLOUD_SCRIPTS)
-	@jq empty images/cloud/base/claude/settings.json && printf '%s: OK\n' images/cloud/base/claude/settings.json
+	@jq empty images/cloud/runner/claude/settings.json && printf '%s: OK\n' images/cloud/runner/claude/settings.json
 
 cloud-test: ## Run the cloud unit tests (Linux: they use /proc and GNU tools)
 	@[ "$(HOST_OS)" = "Linux" ] || { printf 'make cloud-test needs Linux (/proc, GNU date); CI runs it\n' >&2; exit 1; }

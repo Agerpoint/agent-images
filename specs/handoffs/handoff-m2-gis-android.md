@@ -12,8 +12,8 @@ lolay/infrastructure#6 (`logging.viewer` for CI).
 
 What m2 builds on:
 
-- **Images:** `agent-base` (Ubuntu 24.04, `packages.txt`, the Brewfile toolchains,
-  Claude Code last) and `agent-linux` (`FROM agent-base`), built with
+- **Images:** `agent-base` (Ubuntu 24.04, the toolsets in `images/toolsets`, one
+  layer each, Claude Code last) and `agent-linux` (`FROM agent-base`), built with
   `images/cloud/docker-bake.hcl`. The entrypoint has a smoke mode the deploy runs on
   `agent-<type>-next`.
 - **Jobs:** written through the Cloud Run v2 REST API by `scripts/cloud/job-spec.sh`
@@ -33,7 +33,9 @@ gcloud logging read 'resource.type="gce_instance" AND "supervisor: memory"' --pr
 
 ## What m2 delivers
 
-- `gis`: `images/cloud/gis/Dockerfile` (`FROM agent-base`, plus GDAL, PDAL, QGIS),
+- `gis`: its own toolset list (core, native, node, gis: GDAL, PDAL and QGIS from
+  conda-forge through pixi), as [image-toolsets.md](../image-toolsets.md) sets out,
+  not `agent-base` plus extras,
   `infra/gcp/gis.env`, the "Agent: GIS" environment and `claude-env-gis` secret.
   Done when [tests/sessions/gis.md](../../tests/sessions/gis.md) passes.
 - `android`: the Compute Engine path in specs/gcp.md ("Compute Engine VM per
@@ -56,7 +58,8 @@ gcloud logging read 'resource.type="gce_instance" AND "supervisor: memory"' --pr
 
 ## Suggested plan
 
-1. Run the codebase review of m1 on `main` (Review below), then plan m2 with tiers.
+1. Toolsets first ([image-toolsets.md](../image-toolsets.md), "Plan"): s1 to s5
+   landed on `claude/gcp-tools-strategy-6kpqtl`; s6 is `gis`.
 2. `gis` first: it reuses everything. Ask Gary for the scratch quota (100 GiB per
    instance, `ephemeral_disk_per_instance_gib` in lolay/infrastructure, which may need
    Google's approval), then the image, env file, secret, environment, and test.
@@ -66,10 +69,10 @@ gcloud logging read 'resource.type="gce_instance" AND "supervisor: memory"' --pr
 
 ## Gotchas
 
-- **Layer order:** a type's tools come after Claude Code in its image (`FROM
-  agent-base`), so every Claude release rebuilds `gis`'s GDAL and QGIS layers. The
-  spec puts type tools before Claude. Fix it when `gis` lands: build the type's tools
-  on an `agent-base` stage that stops before Claude, then add Claude last.
+- **Layer order:** a type's tools must come before Claude Code, or every Claude
+  release rebuilds `gis`'s GDAL and QGIS layers. Fixed with `gis` (image-toolsets.md
+  s6): each type builds its toolsets, and a shared final stage adds the runner files
+  and Claude last.
 - **Scratch quota:** `gis` wants 100 GiB, which is above the 10 GiB default and needs
   a quota request that may wait on Google. `job-spec.sh` takes `SCRATCH_GIB` from the
   env file.
@@ -100,5 +103,5 @@ gcloud logging read 'resource.type="gce_instance" AND "supervisor: memory"' --pr
 
 ## Review
 
-Pending, after m1's PRs merge: a full codebase review of `main`
-(`personal-codebase-review`), logged in `specs/reviews/`, before m2 is planned.
+A full codebase review of `main` (`personal-codebase-review`), logged in
+`specs/reviews/`, after m2 is done (Gary, 2026-11-05), covering m1 and m2 together.
