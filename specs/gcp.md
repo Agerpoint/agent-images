@@ -2,12 +2,12 @@
 
 Status: **m1 (`linux`) done, 2026-11-05**: sessions run on Cloud Run, tested twice
 ([m1 results](#m1-results)). Written 2026-11-04; the foundation is applied
-(`lolay/infrastructure`, `stacks/gcp/agents`). m2 is under way
-([handoffs/handoff-m2-gis-android.md](handoffs/handoff-m2-gis-android.md)): **`gis`
-done, 2026-11-06** ([m2 `gis` results](#m2-gis-results)), and `android` (a Compute
-Engine VM per session) **done, 2026-11-06** ([m2 `android` results](#m2-android-results)):
-m2 is done. Recheck
-anything marked preview before building on it.
+(`lolay/infrastructure`, `stacks/gcp/agents`). **m2 done, 2026-11-06**: `gis`
+([m2 `gis` results](#m2-gis-results)) and `android`, a Compute Engine VM per
+session ([m2 `android` results](#m2-android-results)). m3, the GPU types, is under
+way ([handoffs/handoff-m3-gpu-types.md](handoffs/handoff-m3-gpu-types.md)): the
+`gpu` toolset and `linux-gpu` on an L4 are built, waiting for their first deploy.
+Recheck anything marked preview before building on it.
 
 The same model as the Mac and Linux runners, with Google running the hardware: Claude's
 orchestrator calls a hook per queued session, the hook starts one throwaway workload,
@@ -56,14 +56,14 @@ Each type is four things, declared in `infra/gcp/<type>.env`:
 | Part | Per type |
 | --- | --- |
 | Claude environment and its secret | Created in claude.ai; the secret goes in Secret Manager as `claude-env-<type>` |
-| Image | `agent-<type>`, built `FROM` `agent-base` or `agent-base-gpu` plus the type's tools |
+| Image | `agent-<type>`, built `FROM` `agent-base` (Ubuntu, or CUDA's devel image for `-gpu` types: bake target `base-gpu`) plus the type's tools |
 | Backend | A Cloud Run job (`agent-<type>`) with its resources, or a Compute Engine template |
 | Orchestrator settings | `--min-idle`, `--expected-spawn-seconds`, runner flags |
 
 | Type | Image | Backend and resources | Scratch disk | Standby |
 | --- | --- | --- | --- | --- |
 | `linux` | `agent-linux` (`agent-base` as is) | Cloud Run job, 4 vCPU, 16 GiB | 10 GiB | 0: a standby holds 4 vCPU and 16 GiB, about $270 a month; 1 later if cold starts hurt |
-| `linux-gpu` | `agent-linux-gpu` (`agent-base-gpu` as is) | Cloud Run job, RTX PRO 6000, 20 vCPU, 80 GiB (that GPU's minimum); L4 for cheap tests | 10 GiB now, 100 GiB later | 0: a standby GPU bills the whole time |
+| `linux-gpu` | `agent-linux-gpu` (`linux`'s toolsets on CUDA's devel image, then `gpu`) | Cloud Run job, RTX PRO 6000, 20 vCPU, 80 GiB (that GPU's minimum); an L4 (4 vCPU, 16 GiB) while m3 tests it | 10 GiB now, 100 GiB later | 0: a standby GPU bills the whole time |
 | `gis` | `agent-gis` (toolsets core, native, node, gis: GDAL, PDAL, QGIS from conda-forge) | Cloud Run job, 8 vCPU, 32 GiB (Cloud Run's most memory; gis is bound by memory, not CPU) | 10 GiB now, 100 GiB later | 0: a standby is about $550 a month |
 | `3d-gpu` | `agent-3d-gpu` (from `agent-base-gpu`: COLMAP built for Blackwell, Blender) | Cloud Run job, RTX PRO 6000 | 10 GiB now, 200 GiB (two volumes) later | 0 |
 | `android` | Compute Engine image | Compute Engine VM per session with nested virtualization ([below](#compute-engine-vm-per-session-android-and-the-gpu-fallback)); Cloud Run has no KVM | 100 GB boot disk | 0 |
@@ -150,8 +150,8 @@ Region: `us-central1`, the one with both L4 and RTX PRO 6000 on Cloud Run.
 ## Images
 
 Each type's tools are a list of toolsets ([image-toolsets.md](image-toolsets.md)),
-so no type inherits another's. `agent-base-gpu` (m3) is still to come, on CUDA's devel
-image rather than runtime.
+so no type inherits another's. The GPU types' parent, `base-gpu` (m3), is
+`agent-base`'s Dockerfile on CUDA's devel image rather than runtime.
 
 We manage them, in this repo, next to the macOS and Linux images, and they share
 `images/shared` so sessions behave the same everywhere.
@@ -159,9 +159,9 @@ We manage them, in this repo, next to the macOS and Linux images, and they share
 ```
 images/cloud/
   base/Dockerfile      ubuntu:24.04 through mirror.gcr.io, the runner user, and the
-                       core toolset; a build parent only
-  base-gpu/Dockerfile  (m3) the same on CUDA 13.0 devel; Xvfb, VirtualGL, mesa-utils,
-                       vulkan-tools; optional noVNC
+                       core toolset; a build parent only. Bake target base-gpu is
+                       the same on CUDA 13.0 devel (BASE_IMAGE), for the -gpu types,
+                       which add the gpu toolset (VirtualGL, Vulkan, EGL) last
   <type>/Dockerfile    FROM agent-base or agent-base-gpu, adds the type's toolsets,
                        one layer each (bake target <type>-tools)
   runner/Dockerfile    FROM the type's tools: images/shared (runner, watchdog, Stop
@@ -208,7 +208,7 @@ Choices, carried over from [design.md](design.md):
 Layer order, slowest-moving first, so a rebuild only redoes what changed:
 
 ```
-FROM <base>@<digest>      ubuntu:24.04, or nvidia/cuda 13.0 runtime for gpu,
+FROM <base>@<digest>      ubuntu:24.04, or nvidia/cuda 13.0 devel for -gpu,
                           both through mirror.gcr.io
 core toolset              apt, Homebrew, the shared session tools (agent-base)
 type toolsets             one layer each: apt at the locked snapshot, Brewfile,
@@ -254,7 +254,6 @@ matrix. A failed deploy makes the next one redeploy more, never less:
 | --- | --- |
 | `images/shared/**`, `images/toolsets/install-toolset.sh`, `images/toolsets/write-claude-md.sh`, `images/cloud/base/**`, `images/cloud/runner/**`, `images/cloud/entrypoint.sh`, `images/cloud/docker-bake.hcl`, `.dockerignore` | Every runner type |
 | `images/toolsets/<toolset>/**` | The types whose Dockerfiles (or build parents') install that toolset |
-| `images/cloud/base-gpu/**` | Every `-gpu` type (each is built `FROM` it) |
 | `images/cloud/<type>/**`, including its `versions.lock` | That type |
 | `hooks/gcp/**`, `images/cloud/orchestrator/**` | The orchestrator host (new image, then the host restarts its container) |
 | `infra/gcp/<type>.env` (CPU, memory, GPU, timeout, `--min-idle`, `REBUILD`) | That type's job and orchestrator settings, no image build |
@@ -347,8 +346,12 @@ Runs only on `main`: a push, a scheduled rebuild or a manual dispatch, one type 
 in a `concurrency` group that queues rather than cancels.
 
 Layer caching through the Actions cache (`cache-to type=gha`), not the registry, so a
-build reads nothing back from GCP. The cache holds 10 GB per repo, so a CUDA image may
-miss and rebuild in full; that costs time, not money. Hosted runners have about 14 GB
+build reads nothing back from GCP. The cache holds 10 GB per repo, shared by every
+type, and CUDA's layers alone are 4 GB, so `-gpu` types build without it (owner,
+2026-11-06): about 12 to 15 minutes from scratch, measured locally for `linux-gpu`,
+and only when something they use changed. The CPU types keep their caches.
+Raising the repo's cache limit ($0.07 per GB-month over 10 GB) would let them
+cache too. Hosted runners have about 14 GB
 of free disk, so GPU builds clear the runner's preinstalled toolchains first, the
 usual step for large images.
 
@@ -387,7 +390,7 @@ no-cache build promoted the same way as a push's. A type without `REBUILD` is
 | Orchestrator | A minute or two | Rides `nightly` (not a type, so no env file) | Baked in; rebuilt nightly |
 | `gis` | 9 GB, most of the Actions cache's 10 GB; conda-forge moves slowly | `weekly`: 05:37 Pacific, Sunday | Self-updates |
 | `android` | About 45 min of Packer with no layer cache, the disk capture and a smoke VM; about $0.50 in GCP | `weekly` | Self-updates |
-| `linux-gpu`, `3d-gpu` (m3) | CUDA; expect cache misses | `weekly` when they land | Self-updates |
+| `linux-gpu`, `3d-gpu` (m3) | About 12 to 15 min from scratch; `-gpu` types build without the Actions cache (CUDA is 4 GB of it) | `weekly` | Self-updates |
 
 The trade is build cost against how fast an image's contents move and what being
 behind costs a session. Claude, the thing that moves most, updates itself at runner
@@ -976,6 +979,7 @@ What the deploys found:
   GPU types move to the Compute Engine path (G4).
 - `3d-gpu`: COLMAP, Blender and the splatting library built for compute capability
   12.0. Done when [tests/sessions/3d-gpu.md](../tests/sessions/3d-gpu.md) passes.
+- Handoff: [handoffs/handoff-m3-gpu-types.md](handoffs/handoff-m3-gpu-types.md).
 
 ### m4 - Dependency watch
 

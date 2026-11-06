@@ -27,7 +27,7 @@ function "tags" {
 }
 
 group "default" {
-  targets = ["linux", "gis", "orchestrator"]
+  targets = ["linux", "linux-gpu", "gis", "orchestrator"]
 }
 
 target "base" {
@@ -59,6 +59,41 @@ target "linux" {
     agent-tools = "target:linux-tools"
   }
   tags = tags("linux")
+}
+
+# The GPU types' parent: base on CUDA's devel image. CUDA 13.0 to match the
+# driver Cloud Run mounts (580.x, CUDA 13.0); a newer CUDA would need NVIDIA's
+# forward-compatibility package. The newest 13.0 patch on the mirror.
+target "base-gpu" {
+  inherits = ["base"]
+  args = {
+    BASE_IMAGE = "mirror.gcr.io/nvidia/cuda:13.0.3-devel-ubuntu24.04"
+  }
+}
+
+# linux-gpu is linux plus the GPU: linux's own Dockerfile on base-gpu
+# (linux-tools-gpu), then images/cloud/linux-gpu adds the gpu toolset.
+target "linux-tools-gpu" {
+  inherits = ["linux-tools"]
+  contexts = {
+    agent-base = "target:base-gpu"
+  }
+}
+
+target "linux-gpu-tools" {
+  context    = "."
+  dockerfile = "images/cloud/linux-gpu/Dockerfile"
+  contexts = {
+    agent-linux = "target:linux-tools-gpu"
+  }
+}
+
+target "linux-gpu" {
+  inherits = ["_runner"]
+  contexts = {
+    agent-tools = "target:linux-gpu-tools"
+  }
+  tags = tags("linux-gpu")
 }
 
 target "gis-tools" {
