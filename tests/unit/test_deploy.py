@@ -44,7 +44,10 @@ case "$1 $2" in
 			fi
 		done
 		exit "${{FAKE_SMOKE_STATUS:-0}}" ;;
-	executions) allow --job --project --region --sort-by --limit --format; echo agent-linux-next-p5rqf ;;
+	executions)
+		[[ "$4" == list ]] || {{ echo "ERROR: (gcloud.run.jobs.executions) invalid choice: '$4'" >&2; exit 2; }}
+		allow --job --project --region --sort-by --limit --format; echo agent-linux-next-p5rqf ;;
+	*) echo "ERROR: (gcloud.run.jobs) Invalid choice: '$3'" >&2; exit 2 ;;
 	esac ;;
 "logging read")
 	allow --project --order --limit --format
@@ -56,6 +59,7 @@ case "$1 $2" in
 	describe)
 		allow --project --zone --format
 		echo '{{"metadata": {{"items": [{{"key": "orchestrator-image", "value": "{REGISTRY}/agent-orchestrator@sha256:cc"}}]}}}}' ;;
+	*) echo "ERROR: (gcloud.compute.instances) Invalid choice: '$3'" >&2; exit 2 ;;
 	esac ;;
 *) echo "ERROR: (gcloud) the fake doesn't know $*" >&2; exit 2 ;;
 esac
@@ -308,6 +312,19 @@ class VmDeployTests(DeployTests):
             result = self.deploy(command, "linux", ANDROID_IMAGE, "abc")
             self.assertEqual(result.returncode, 1)
             self.assertIn("isn't a Compute Engine type", result.stderr)
+
+    def test_vm_commands_refuse_deploy_false(self):
+        # The supervisor would drop the orchestrator, and nothing would serve the VM.
+        env_dir = self.tmp / "infra"
+        env_dir.mkdir()
+        (env_dir / "project.env").write_text((REPO / "infra/gcp/project.env").read_text())
+        (env_dir / "android.env").write_text((REPO / "infra/gcp/android.env").read_text() + "DEPLOY=false\n")
+        for command in ("vm-build", "vm-promote"):
+            with self.subTest(command=command):
+                result = self.deploy(command, "android", ANDROID_IMAGE, "abc123def456", AGENT_GCP_ENV_DIR=str(env_dir))
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("DEPLOY=false is for Cloud Run types only", result.stderr)
+                self.assertFalse((self.out / "packer.log").exists())
 
     def test_type_refuses_a_compute_type(self):
         result = self.deploy("type", "android", IMAGE, "abc")
