@@ -3,9 +3,9 @@
 Status: **m1 (`linux`) done, 2026-11-05**: sessions run on Cloud Run, tested twice
 ([m1 results](#m1-results)). Written 2026-11-04; the foundation is applied
 (`lolay/infrastructure`, `stacks/gcp/agents`). m2 is under way
-([handoffs/handoff-m2-gis-android.md](handoffs/handoff-m2-gis-android.md)): `gis`
-landed in lolay/agent-images#18, and `android` (a Compute Engine VM per session) is
-built and waiting for its first deploy. Recheck
+([handoffs/handoff-m2-gis-android.md](handoffs/handoff-m2-gis-android.md)): **`gis`
+done, 2026-11-06** ([m2 `gis` results](#m2-gis-results)), and `android` (a Compute
+Engine VM per session) is built and waiting for its first deploy. Recheck
 anything marked preview before building on it.
 
 The same model as the Mac and Linux runners, with Google running the hardware: Claude's
@@ -857,6 +857,23 @@ deploys found:
   boot time compared against the Linux host's. Plan:
   [handoffs/plan-gcp-android-kestrel.md](handoffs/plan-gcp-android-kestrel.md); built,
   waiting for its first deploy.
+
+#### m2 `gis` results
+
+Done 2026-11-06: [lolay/agent-images#18](https://github.com/lolay/agent-images/pull/18)
+(toolsets and `gis`), #19 (8 vCPU, 32 GiB) and #20 (the deploy's bake metadata).
+[tests/sessions/gis.md](../tests/sessions/gis.md) passed every check that can pass,
+with nothing installed during the session. What it found:
+
+| Finding | Result |
+| --- | --- |
+| Stack | GDAL 3.13.3, PDAL 2.10.2, QGIS 4.2.3, PROJ 9.9.0; every binding imports. The 4 plugins the build drops (TileDB, MDAL) weren't needed |
+| Cloud-native reads | NDVI for the box read 10.9 MB of 437 MB of band files (2.5%) over `/vsicurl/` |
+| LiDAR | 8.97 M points from the 3DEP EPT for a 500 m square in 41 s, peak RSS under 1 GB |
+| QGIS | `qgis_process` zonal statistics agree with the session's own to 5e-5; PyQGIS renders offscreen |
+| Resources | 10 GiB scratch was enough; 32 GiB memory went unused by this test, so real workloads decide whether #19's size holds. `nproc` reports 9 for 8 vCPU |
+| Not run | The cost line (no price lookup yet) and QGIS desktop (`gis` has no display) |
+| Test fixes | The NDVI red-band offset and floor, noise before the DSM, inclusive `writers.gdal` bounds, a map inset, Overpass's encoding: folded into the test |
 
 ### m3 - GPU types
 
