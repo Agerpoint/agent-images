@@ -82,9 +82,9 @@ no Terraform change and no key lands in state.
 - Cloud Run ephemeral disk quota: 200 GiB per instance
   (`MaxPerInstanceEphemeralDiskSizePerProjectRegion`, `us-central1`), granted by Google
   on 2026-11-10; it covers `gis` and `linux-gpu` (100 GiB) and `3d-gpu` (200 GiB). The
-  region's 100 GiB default total is granted when a job first uses scratch (until then
-  the granted value reads 0, so Terraform doesn't manage the regional preference). One
-  100 GiB session fills it, so it needs raising before types run side by side.
+  region's total (`EphemeralDiskAllocPerProjectRegion`) reads 500 GiB in `us-central1`
+  (checked 2026-11-10), room for a `gis` and a `3d-gpu` session at once plus a handful
+  of `linux` ones, so Terraform doesn't manage the regional preference.
 
 ### Network and the orchestrator host
 

@@ -666,11 +666,11 @@ don't care which type they're on:
   session. Each volume holds 1 to 100 GiB, up to ten per instance, and it's gone when
   the execution ends, crash included. `lolay-agents` may give an instance up to
   200 GiB (`MaxPerInstanceEphemeralDiskSizePerProjectRegion` in `us-central1`, raised
-  from the default 10 GiB on 2026-11-10), so every size above fits. The region's
-  total, 100 GiB by default and granted on first use, is the tighter limit: one
-  100 GiB `gis` session holds all of it, and a session that would go past it doesn't
-  start. Raise the regional total before running types side by side. `TMPDIR` and the
-  caches (`XDG_CACHE_HOME`, pip, Homebrew) point at scratch too.
+  from the default 10 GiB on 2026-11-10), so every size above fits. All instances in
+  the region share 500 GiB (`EphemeralDiskAllocPerProjectRegion`): a `gis` and a
+  `3d-gpu` session at once plus a handful of `linux` ones. A session that would go
+  past it doesn't start. `TMPDIR` and the caches (`XDG_CACHE_HOME`, pip, Homebrew)
+  point at scratch too.
 - **Outputs** is for anything worth keeping that's too big for git: dense point
   clouds, trained models, renders, rasters. Each session writes under
   `<type>/<UTC date>/<session id>/`, so a listing reads by type and day; you read
